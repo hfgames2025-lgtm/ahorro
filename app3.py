@@ -1,119 +1,86 @@
 import streamlit as st
-import os
-import json
+import pandas as pd
+from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Mi Tablero de Ahorros", page_icon="💰", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="Sistema de Ahorros Colectivo", layout="wide")
 
-# --- LÓGICA DE ARCHIVOS (Ahora usamos JSON para guardar múltiples ajustes) ---
-ARCHIVO_CONFIG = "config_ahorros.json"
+# SUSTITUYE ESTE LINK POR EL DE TU HOJA DE GOOGLE (Asegúrate de que termine en /edit?usp=sharing)
+URL_EXCEL = "TU_LINK_DE_GOOGLE_SHEETS_AQUI"
 
-def cargar_todo():
-    defaults = {"ahorro_total": 0, "meta": 1000000, "valor_cuadro": 100}
-    if os.path.exists(ARCHIVO_CONFIG):
-        with open(ARCHIVO_CONFIG, "r") as f:
-            return {**defaults, **json.load(f)}
-    return defaults
+# --- CONEXIÓN A BASE DE DATOS ---
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df = conn.read(spreadsheet=URL_EXCEL)
+except:
+    st.error("Error al conectar con la base de datos. Verifica el link de Google Sheets.")
+    st.stop()
 
-def guardar_todo(datos):
-    with open(ARCHIVO_CONFIG, "w") as f:
-        json.dump(datos, f)
+# --- LÓGICA DE LOGIN ---
+if 'usuario_logueado' not in st.session_state:
+    st.session_state.usuario_logueado = None
 
-# Inicializar datos en la sesión
-if 'datos' not in st.session_state:
-    st.session_state.datos = cargar_todo()
-
-# --- ESTILOS CSS ---
-st.markdown("""
-<style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
-    .metric-card {
-        background-color: #161b22;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #30363d;
-        text-align: center;
-    }
-    .grid-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(8px, 1fr));
-        gap: 4px;
-        padding: 10px;
-    }
-    .cuadro {
-        width: 12px; height: 12px;
-        background-color: #21262d;
-        border-radius: 2px;
-    }
-    .pintado {
-        background-color: #238636;
-        box-shadow: 0 0 8px #2ea043;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- BARRA LATERAL (Configuración y Aportes) ---
-with st.sidebar:
-    st.title("⚙️ Configuración")
+def login():
+    st.title("🔐 Acceso al Tablero")
+    user = st.text_input("Usuario")
+    pw = st.text_input("Contraseña", type="password")
     
-    # Sección para cambiar la Meta
-    with st.expander("Ajustar Meta y Valores"):
-        nueva_meta = st.number_input("Meta Total ($)", value=st.session_state.datos['meta'], step=1000)
-        nuevo_valor_cuadro = st.number_input("Valor por cuadro ($)", value=st.session_state.datos['valor_cuadro'], min_value=1, step=10)
-        
-        if st.button("Guardar Configuración"):
-            st.session_state.datos['meta'] = nueva_meta
-            st.session_state.datos['valor_cuadro'] = nuevo_valor_cuadro
-            guardar_todo(st.session_state.datos)
-            st.success("¡Configuración actualizada!")
+    if st.button("Entrar"):
+        # Buscamos si el usuario existe en el Excel
+        match = df[(df['usuario'] == user) & (df['password'].astype(str) == pw)]
+        if not match.empty:
+            st.session_state.usuario_logueado = user
             st.rerun()
+        else:
+            st.error("Usuario o contraseña incorrectos")
 
-    st.markdown("---")
-    st.title("💵 Aportar")
-    monto_aporte = st.number_input("Monto a sumar:", min_value=0, step=100)
-    if st.button("Confirmar Aporte"):
-        st.session_state.datos['ahorro_total'] += monto_aporte
-        guardar_todo(st.session_state.datos)
-        st.toast(f"¡Sumaste ${monto_aporte}!")
+# --- PANEL PRINCIPAL ---
+if st.session_state.usuario_logueado:
+    user = st.session_state.usuario_logueado
+    
+    # Extraer datos del usuario actual
+    datos_user = df[df['usuario'] == user].iloc[0]
+    ahorro = float(datos_user['ahorro_actual'])
+    meta = float(datos_user['meta'])
+    
+    st.sidebar.write(f"👤 Usuario: **{user}**")
+    if st.sidebar.button("Cerrar Sesión"):
+        st.session_state.usuario_logueado = None
         st.rerun()
 
-    if st.button("Reiniciar Ahorros a $0"):
-        st.session_state.datos['ahorro_total'] = 0
-        guardar_todo(st.session_state.datos)
-        st.rerun()
+    # --- VISTA DE ADMINISTRADOR (SOLO PARA TI) ---
+    if user == "admin": # Tú serás el usuario 'admin'
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🛠️ Panel Master")
+        with st.sidebar.expander("Crear Nuevo Usuario"):
+            nuevo_u = st.text_input("Nombre Nuevo")
+            nuevo_p = st.text_input("Pass Nuevo")
+            nueva_m = st.number_input("Meta Inicial", value=100000)
+            if st.button("Registrar Usuario"):
+                # Aquí agregaríamos la lógica para escribir en el Excel
+                st.warning("Para guardar cambios permanentes, edita directamente tu Google Sheet por ahora.")
 
-# --- CUERPO PRINCIPAL ---
-datos = st.session_state.datos
-meta = datos['meta']
-total = datos['ahorro_total']
-valor_c = datos['valor_cuadro']
+    # --- VISTA DEL TABLERO ---
+    st.title(f"¡Hola, {user}! 👋")
+    st.subheader(f"Tu meta actual es de ${meta:,}")
+    
+    # Cuadricula
+    valor_cuadro = 100
+    total_cuadros = int(meta // valor_cuadro)
+    cuadros_pintados = int(ahorro // valor_cuadro)
+    
+    # Métricas
+    c1, c2 = st.columns(2)
+    c1.metric("Llevas ahorrado", f"${ahorro:,}")
+    c2.progress(min(ahorro/meta, 1.0))
 
-# Cálculos
-total_cuadros = meta // valor_c
-cuadros_pintados = min(total // valor_c, total_cuadros)
-porcentaje = (total / meta) * 100 if meta > 0 else 0
+    # Dibujar Cuadritos
+    html_grid = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(10px, 1fr)); gap: 3px;">'
+    for i in range(total_cuadros):
+        color = "#00e676" if i < cuadros_pintados else "#333"
+        html_grid += f'<div style="width:10px; height:10px; background:{color}; border-radius:2px;"></div>'
+    html_grid += '</div>'
+    st.markdown(html_grid, unsafe_allow_html=True)
 
-st.title(f"🎯 Objetivo: ${meta:,}")
-
-# Métricas visuales
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.markdown(f'<div class="metric-card"><h3>Ahorrado</h3><h2>${total:,}</h2></div>', unsafe_allow_html=True)
-with col2:
-    st.markdown(f'<div class="metric-card"><h3>Progreso</h3><h2>{porcentaje:.1f}%</h2></div>', unsafe_allow_html=True)
-with col3:
-    faltante = max(meta - total, 0)
-    st.markdown(f'<div class="metric-card"><h3>Faltan</h3><h2>${faltante:,}</h2></div>', unsafe_allow_html=True)
-
-st.markdown("---")
-
-# --- DIBUJO DE LA CUADRÍCULA ---
-st.subheader(f"Tablero de {total_cuadros:,} cuadros (Cada cuadro = ${valor_c})")
-
-html_grid = '<div class="grid-container">'
-for i in range(total_cuadros):
-    clase = "cuadro pintado" if i < cuadros_pintados else "cuadro"
-    html_grid += f'<div class="{clase}"></div>'
-html_grid += '</div>'
-
-st.markdown(html_grid, unsafe_allow_html=True)
+else:
+    login()
