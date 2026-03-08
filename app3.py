@@ -2,115 +2,79 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Sistema de Metas", layout="wide")
+# Configuración básica
+st.set_page_config(page_title="Mi App de Ahorros", layout="wide")
 
-# Estilo visual mejorado
-st.markdown("""
-<style>
-    .user-badge { background-color: #1e1e1e; padding: 10px; border-radius: 10px; border: 1px solid #333; margin-bottom: 20px; }
-    .stProgress > div > div > div > div { background-color: #00e676; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- CONEXIÓN A GOOGLE SHEETS ---
+# Conexión con Google Sheets (usa el link de los Secrets)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# Función para leer datos actualizados
 def cargar_datos():
-    # Forzamos la limpieza de caché para ver cambios en tiempo real
     return conn.read(ttl=0)
 
-# --- ESTADO DE SESIÓN ---
-if 'usuario_logueado' not in st.session_state:
-    st.session_state.usuario_logueado = None
+# Estado de la sesión (Login)
+if 'user' not in st.session_state:
+    st.session_state.user = None
 
 # --- PANTALLA DE LOGIN ---
-if st.session_state.usuario_logueado is None:
-    st.title("🎯 Bienvenid@ a tu Tablero")
-    with st.form("login_form"):
-        user_input = st.text_input("Nombre de Usuario").strip()
-        pass_input = st.text_input("Contraseña", type="password")
-        submit = st.form_submit_button("Entrar")
-        
-        if submit:
-            df = cargar_datos()
-            # Verificamos credenciales
-            user_data = df[(df['usuario'] == user_input) & (df['password'].astype(str) == pass_input)]
-            
-            if not user_data.empty:
-                st.session_state.usuario_logueado = user_input
-                st.rerun()
-            else:
-                st.error("Usuario o contraseña incorrectos")
+if st.session_state.user is None:
+    st.title("🚀 Acceso al Tablero")
+    u = st.text_input("Usuario")
+    p = st.text_input("Contraseña", type="password")
+    if st.button("Entrar"):
+        df = cargar_datos()
+        # Verificamos si existe el usuario y coincide la contraseña
+        check = df[(df['usuario'] == u) & (df['password'].astype(str) == p)]
+        if not check.empty:
+            st.session_state.user = u
+            st.rerun()
+        else:
+            st.error("Datos incorrectos")
 
-# --- APP UNA VEZ LOGUEADO ---
+# --- APP PRINCIPAL ---
 else:
     df = cargar_datos()
-    usuario_actual = st.session_state.usuario_logueado
-    datos_user = df[df['usuario'] == usuario_actual].iloc[0]
+    usuario = st.session_state.user
+    datos = df[df['usuario'] == usuario].iloc[0]
     
-    # Datos del usuario
-    ahorro = float(datos_user['ahorro_actual'])
-    meta = float(datos_user['meta'])
-    es_admin = (usuario_actual.lower() == "admin")
+    ahorro = float(datos['ahorro_actual'])
+    meta = float(datos['meta'])
 
-    # Barra lateral
-    with st.sidebar:
-        st.markdown(f'<div class="user-badge">👤 Conectado como:<br><b>{usuario_actual}</b></div>', unsafe_allow_html=True)
-        
-        if st.button("Cerrar Sesión"):
-            st.session_state.usuario_logueado = None
-            st.rerun()
-        
-        st.markdown("---")
-        if es_admin:
-            st.subheader("🛠️ Panel Master")
-            st.info("Como Admin, puedes ver y editar todos los usuarios directamente en el Google Sheet.")
+    st.title(f"¡Hola, {usuario}!")
+    st.sidebar.button("Cerrar Sesión", on_click=lambda: st.session_state.update({"user": None}))
 
-    # Cuerpo principal
-    st.title(f"¡Hola de nuevo, {usuario_actual}! 👋")
+    # Métricas
+    c1, c2 = st.columns(2)
+    c1.metric("Llevas ahorrado", f"${ahorro:,.0f}")
+    c2.metric("Tu meta", f"${meta:,.0f}")
+
+    # Barra de progreso
+    progreso = min(ahorro / meta, 1.0)
+    st.progress(progreso)
+
+    # --- BOTÓN PARA SUMAR DINERO ---
+    st.subheader("➕ Sumar nuevo ahorro")
+    monto = st.number_input("¿Cuánto vas a guardar hoy?", min_value=0, step=100)
     
-    # Métricas principales
-    col1, col2, col3 = st.columns(3)
-    porcentaje = min(ahorro / meta, 1.0)
-    
-    col1.metric("Ahorro Actual", f"${ahorro:,.0f}")
-    col2.metric("Meta Objetivo", f"${meta:,.0f}")
-    col3.metric("Faltan", f"${(meta - ahorro):,.0f}")
-
-    st.write(f"**Progreso:** {porcentaje*100:.1f}%")
-    st.progress(porcentaje)
+    if st.button("Guardar Ahorro"):
+        # 1. Calculamos el nuevo total
+        nuevo_total = ahorro + monto
+        # 2. Actualizamos nuestra tabla (DataFrame)
+        df.loc[df['usuario'] == usuario, 'ahorro_actual'] = nuevo_total
+        # 3. LO GUARDAMOS EN GOOGLE SHEETS
+        conn.update(data=df)
+        st.success(f"¡Guardado! Ahora tienes ${nuevo_total:,.0f}")
+        st.rerun()
 
     # --- TABLERO DE CUADROS ---
     st.markdown("---")
-    valor_cuadro = 100 # Puedes cambiar esto o hacerlo dinámico
+    valor_cuadro = 100 
     total_cuadros = int(meta // valor_cuadro)
-    cuadros_pintados = int(ahorro // valor_cuadro)
+    pintados = int(ahorro // valor_cuadro)
     
-    st.subheader(f"Tu progreso visual ({cuadros_pintados:,} de {total_cuadros:,} cuadros)")
-    
-    # Generar cuadrícula eficiente
-    html_grid = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(12px, 1fr)); gap: 4px;">'
+    grid = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(12px, 1fr)); gap: 4px;">'
     for i in range(total_cuadros):
-        color = "#00e676" if i < cuadros_pintados else "#2d2d2d"
-        # Brillo neón para los pintados
-        estilo = f'background-color: {color}; width: 12px; height: 12px; border-radius: 2px;'
-        if i < cuadros_pintados:
-            estilo += "box-shadow: 0 0 5px #00e676;"
-        html_grid += f'<div style="{estilo}"></div>'
-    html_grid += '</div>'
-    
-    st.markdown(html_grid, unsafe_allow_html=True)
-
-    # --- BOTÓN PARA SUMAR (Solo para el usuario logueado) ---
-    st.markdown("---")
-    with st.expander("➕ Añadir nuevo ahorro"):
-        monto_nuevo = st.number_input("¿Cuánto vas a sumar hoy?", min_value=0, step=100)
-        if st.button("Confirmar Aporte"):
-            # Lógica para actualizar Google Sheets
-            nuevo_total = ahorro + monto_nuevo
-            # Actualizar en el dataframe y subir
-            df.loc[df['usuario'] == usuario_actual, 'ahorro_actual'] = nuevo_total
-            conn.update(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"], data=df)
-            st.success(f"¡Genial! Has sumado ${monto_nuevo}. El tablero se actualizará en unos segundos.")
-            st.rerun()
+        color = "#00e676" if i < pintados else "#333"
+        grid += f'<div style="background:{color}; width:12px; height:12px; border-radius:2px;"></div>'
+    grid += '</div>'
+    st.markdown(grid, unsafe_allow_html=True)
