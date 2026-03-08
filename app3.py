@@ -1,87 +1,81 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+import os
 
-# Configuración de la App
-st.set_page_config(page_title="Mi App de Ahorros", layout="wide")
+# Configuración
+st.set_page_config(page_title="Mi Ahorro", layout="centered")
 
-# Conectamos con el motor de Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Archivo donde se guardarán los datos (Se queda en el servidor)
+DB_FILE = "datos_ahorro.csv"
+
+# Si el archivo no existe, lo creamos con datos iniciales
+if not os.path.exists(DB_FILE):
+    df_inicial = pd.DataFrame([
+        {"usuario": "admin", "password": "123", "ahorro": 0.0, "meta": 1000000.0},
+        {"usuario": "juan", "password": "456", "ahorro": 500.0, "meta": 500000.0}
+    ])
+    df_inicial.to_csv(DB_FILE, index=False)
 
 def cargar_datos():
-    # ttl=0 obliga a la app a leer datos frescos del Excel cada vez
-    return conn.read(ttl=0)
+    return pd.read_csv(DB_FILE)
 
+def guardar_datos(df):
+    df.to_csv(DB_FILE, index=False)
+
+# --- LOGIN ---
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-# --- LOGIN ---
 if st.session_state.user is None:
-    st.title("🔐 Acceso")
-    u = st.text_input("Usuario").strip()
-    p = st.text_input("Contraseña", type="password")
+    st.title("💰 Mi Tablero de Ahorro")
+    u = st.text_input("Usuario")
+    p = st.text_input("Clave", type="password")
     if st.button("Entrar"):
         df = cargar_datos()
-        check = df[(df['usuario'] == u) & (df['password'].astype(str) == p)]
-        if not check.empty:
+        user_match = df[(df['usuario'] == u) & (df['password'].astype(str) == p)]
+        if not user_match.empty:
             st.session_state.user = u
             st.rerun()
         else:
             st.error("Usuario o clave incorrectos")
-
-# --- TABLERO ---
 else:
-    df = cargar_datos()
+    # --- APP PRINCIPAL ---
     usuario = st.session_state.user
+    df = cargar_datos()
     
-    # Buscamos los datos de este usuario específico
-    try:
-        datos = df[df['usuario'] == usuario].iloc[0]
-        ahorro = float(datos['ahorro_actual'])
-        meta = float(datos['meta'])
-    except:
-        st.error("Error al leer tus datos. Revisa las columnas del Excel.")
-        st.stop()
+    # Obtener datos del usuario
+    idx = df[df['usuario'] == usuario].index[0]
+    ahorro = float(df.at[idx, 'ahorro'])
+    meta = float(df.at[idx, 'meta'])
 
-    st.title(f"👋 ¡Hola, {usuario}!")
+    st.title(f"Hola, {usuario} 👋")
     
     # Métricas
-    c1, c2 = st.columns(2)
-    c1.metric("Ahorrado", f"${ahorro:,.0f}")
-    c2.metric("Meta", f"${meta:,.0f}")
-    
-    st.progress(min(ahorro/meta, 1.0))
+    col1, col2 = st.columns(2)
+    col1.metric("Llevas", f"${ahorro:,.0f}")
+    col2.metric("Meta", f"${meta:,.0f}")
 
-    # --- GUARDAR NUEVO AHORRO ---
+    # Sumar Ahorro
+    nuevo = st.number_input("Sumar cantidad:", min_value=0, step=100)
+    if st.button("Confirmar Pago"):
+        df.at[idx, 'ahorro'] = ahorro + nuevo
+        guardar_datos(df)
+        st.success("¡Ahorro guardado!")
+        st.rerun()
+
+    # Cuadritos
     st.markdown("---")
-    with st.expander("💰 Añadir dinero"):
-        monto = st.number_input("Monto a sumar:", min_value=0, step=100)
-        if st.button("Confirmar y Guardar"):
-            # Calculamos y actualizamos localmente
-            nuevo_total = ahorro + monto
-            df.loc[df['usuario'] == usuario, 'ahorro_actual'] = nuevo_total
-            
-            # GUARDAR EN GOOGLE SHEETS (La parte crítica)
-            try:
-                conn.update(data=df)
-                st.success(f"¡Guardado con éxito! Total: ${nuevo_total:,.0f}")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error de permisos: Asegúrate de que el Excel esté en modo 'Editor'.")
-
-    # --- CUADRICULA ---
-    st.subheader("Tu progreso visual")
-    valor_cuadro = 100 
-    total_cuadros = int(meta // valor_cuadro)
-    pintados = int(ahorro // valor_cuadro)
+    valor_cuadro = 100
+    total = int(meta // valor_cuadro)
+    pintados = int((ahorro + nuevo) // valor_cuadro)
     
-    grid_html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(12px, 1fr)); gap: 4px;">'
-    for i in range(total_cuadros):
+    grid = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(10px, 1fr)); gap: 3px;">'
+    for i in range(total):
         color = "#00e676" if i < pintados else "#333"
-        grid_html += f'<div style="background:{color}; width:12px; height:12px; border-radius:2px;"></div>'
-    grid_html += '</div>'
-    st.markdown(grid_html, unsafe_allow_html=True)
-
-    if st.sidebar.button("Cerrar Sesión"):
+        grid += f'<div style="background:{color}; width:10px; height:10px; border-radius:2px;"></div>'
+    grid += '</div>'
+    st.markdown(grid, unsafe_allow_html=True)
+    
+    if st.sidebar.button("Salir"):
         st.session_state.user = None
         st.rerun()
