@@ -11,7 +11,7 @@ if not os.path.exists(DB_FILE):
     df_inicial = pd.DataFrame([
         {"usuario": "admin", "password": "123", "ahorro": 0.0, "meta": 1000000.0},
       {"usuario": "hfaggi", "password": "6dejulio", "ahorro": 0.0, "meta": 100000.0},
-        {"usuario": "joan", "password": "Aa123456", "ahorro": 0.0, "meta": 100000.0}
+        {"usuario": "joan", "password": "Aa123456", "ahorro": 0.0, "meta": 100000.0},
         {"usuario": "juan", "password": "456", "ahorro": 0.0, "meta": 500000.0}
     ])
     df_inicial.to_csv(DB_FILE, index=False)
@@ -97,3 +97,4 @@ else:
     if st.sidebar.button("Cerrar Sesión"):
         st.session_state.user = None
         st.rerun()
+
