@@ -3,16 +3,15 @@ import pandas as pd
 import os
 from datetime import datetime
 
-# --- CONFIGURACIÓN Y ESTILOS ---
-st.set_page_config(page_title="Tablero de Ahorro Colectivo", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="Tablero de Ahorro Master", layout="wide")
 
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
     div[data-testid="stMetric"] {
         background: rgba(255, 255, 255, 0.05);
-        border-radius: 15px;
-        padding: 15px !important;
+        border-radius: 15px; padding: 15px !important;
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .stButton>button {
@@ -28,7 +27,6 @@ st.markdown("""
 DB_FILE = "datos_ahorro.csv"
 LOG_FILE = "historial_ahorros.csv"
 
-# --- GESTIÓN DE DATOS ---
 def cargar_datos():
     if not os.path.exists(DB_FILE):
         df = pd.DataFrame([
@@ -97,7 +95,6 @@ else:
     df = cargar_datos()
     usuario = st.session_state.user
     
-    # --- VISTA ADMIN ---
     if usuario == "admin":
         st.title("👑 Panel Maestro")
         t1, t2, t3, t4 = st.tabs(["📊 Global", "👥 Usuarios", "📝 Historial", "💰 Mi Ahorro"])
@@ -110,53 +107,78 @@ else:
             c1.metric("Total entre todos", f"${total_ahorrado:,.0f}")
             c2.metric("Meta Grupal", f"${total_metas:,.0f}")
             st.progress(min(total_ahorrado/total_metas, 1.0))
-            
 
         with t2:
+            st.write("### Gestión de Cuentas")
             st.dataframe(df, use_container_width=True)
-            u_mod = st.selectbox("Gestionar usuario:", df['usuario'].tolist())
-            if st.button("Eliminar Usuario") and u_mod != "admin":
-                df = df[df['usuario'] != u_mod]
-                guardar_datos(df)
-                st.rerun()
+            
+            st.markdown("---")
+            u_sel = st.selectbox("Selecciona usuario para editar:", df['usuario'].tolist())
+            
+            col_ed1, col_ed2 = st.columns(2)
+            with col_ed1:
+                nueva_clv = st.text_input(f"Nueva clave para {u_sel}", type="password")
+                if st.button("Cambiar Clave"):
+                    df.loc[df['usuario'] == u_sel, 'password'] = nueva_clv
+                    guardar_datos(df)
+                    registrar_log("admin", f"Cambió clave de {u_sel}", 0)
+                    st.success("Clave actualizada.")
+            
+            with col_ed2:
+                nuevo_ahorro = st.number_input(f"Corregir ahorro de {u_sel}", value=float(df.loc[df['usuario'] == u_sel, 'ahorro'].values[0]))
+                if st.button("Corregir Saldo"):
+                    df.loc[df['usuario'] == u_sel, 'ahorro'] = nuevo_ahorro
+                    guardar_datos(df)
+                    registrar_log("admin", f"Corrigió saldo de {u_sel}", nuevo_ahorro)
+                    st.success("Saldo corregido.")
+            
+            st.markdown("---")
+            if st.button("❌ ELIMINAR ESTE USUARIO DEFINITIVAMENTE"):
+                if u_sel != "admin":
+                    df = df[df['usuario'] != u_sel]
+                    guardar_datos(df)
+                    registrar_log("admin", f"Eliminó a {u_sel}", 0)
+                    st.warning(f"Usuario {u_sel} eliminado.")
+                    st.rerun()
+                else: st.error("No puedes eliminar al administrador.")
 
         with t3:
             if os.path.exists(LOG_FILE):
                 log_df = pd.read_csv(LOG_FILE)
-                st.table(log_df.tail(15)) # Muestra los últimos 15 movimientos
-            else: st.write("Aún no hay movimientos registrados.")
+                st.table(log_df.tail(20))
+            else: st.write("Sin movimientos.")
 
         with t4:
             idx = df[df['usuario'] == "admin"].index[0]
             ahorro = float(df.at[idx, 'ahorro'])
-            m = st.number_input("Sumar aporte personal:", min_value=0)
-            if st.button("Guardar"):
-                df.at[idx, 'ahorro'] = ahorro + m
+            meta_admin = float(df.at[idx, 'meta'])
+            st.metric("Mi Ahorro", f"${ahorro:,.0f}")
+            m_adm = st.number_input("Sumar aporte:", min_value=0, key="adm_in")
+            if st.button("Confirmar Mi Aporte"):
+                df.at[idx, 'ahorro'] = ahorro + m_adm
                 guardar_datos(df)
-                registrar_log("admin", "Aporte", m)
+                registrar_log("admin", "Aporte propio", m_adm)
                 st.rerun()
 
-    # --- VISTA USUARIO NORMAL ---
     else:
+        # VISTA USUARIO NORMAL (Sin cambios, funciona perfecto)
         idx = df[df['usuario'] == usuario].index[0]
         ahorro = float(df.at[idx, 'ahorro'])
         meta = float(df.at[idx, 'meta'])
-        
         st.title(f"🎮 Panel de {usuario}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Llevas", f"${ahorro:,.0f}")
-        c2.metric("Tu Meta", f"${meta:,.0f}")
-        c3.metric("Te faltan", f"${max(0, meta-ahorro):,.0f}")
-
-        m = st.number_input("¿Cuánto sumas hoy?", min_value=0)
-        if st.button("CONFIRMAR APORTE"):
+        c2.metric("Meta", f"${meta:,.0f}")
+        c3.metric("Faltan", f"${max(0, meta-ahorro):,.0f}")
+        m = st.number_input("Sumar hoy:", min_value=0)
+        if st.button("GUARDAR"):
             df.at[idx, 'ahorro'] = ahorro + m
             guardar_datos(df)
             registrar_log(usuario, "Aporte", m)
             st.balloons()
             st.rerun()
-
-        # Cuadrícula Visual
+        
+        # Cuadritos
         st.markdown("---")
         total_c = int(meta // 100)
         pint_c = int(ahorro // 100)
